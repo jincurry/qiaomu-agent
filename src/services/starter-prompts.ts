@@ -43,7 +43,7 @@ export const STARTER_PROMPTS: Record<StarterScene, StarterPrompt[]> = {
     { id: "sel-continue", label: "顺着往下写", body: "顺着选中内容的思路和文风续写一段，200 字左右，不要重复已经说过的话。" },
   ],
   reading: [
-    { id: "read-three", label: "三句话讲清", body: "用三句话讲清我正在读的内容：它在说什么，凭什么这么说，对我有什么用。" },
+    { id: "read-three", label: "三句话讲清", body: "用三句话讲清我正在读的内容：它在说什么，凭什么这么说，对我有什么用。严格三句话，每句独立一段，段落之间留一个空行，不加标题或编号。" },
     { id: "read-argument", label: "理一理论证", body: "梳理作者的核心论点和支撑证据，分清哪些是事实、哪些是观点，指出最薄弱的一环。" },
     { id: "read-quotes", label: "摘出值得记的句子", body: "摘出正在读的内容里最值得记住的 5 句原文，每句后面用一行写我可以怎么用上它。" },
     { id: "read-note", label: "整理成读书笔记", body: "把正在读的内容整理成一篇读书笔记：一句话概括、关键要点、相关概念，最后留一个「我的想法」小节给我自己写。" },

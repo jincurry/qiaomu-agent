@@ -1,7 +1,11 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 
-const git = (...args) => execFileSync("git", args, { encoding: "utf8" }).trim();
+// Push hooks export repository-local variables. Clear them before using -C so each
+// worktree is checked against its own HEAD/index, not the publishing checkout's.
+const gitEnvironment = { ...process.env };
+for (const name of execFileSync("git", ["rev-parse", "--local-env-vars"], { encoding: "utf8" }).trim().split(/\r?\n/)) delete gitEnvironment[name];
+const git = (...args) => execFileSync("git", args, { encoding: "utf8", env: gitEnvironment }).trim();
 const failures = [];
 const worktrees = git("worktree", "list", "--porcelain").split("\n\n");
 for (const entry of worktrees) {

@@ -116,9 +116,9 @@ function HostMarkdown({ text, sourcePath, app, parent }: { text: string; sourceP
 
 function NoteMarkdown(props: { text: string; sourcePath: string; app: App; parent: Component }) {
   let charts = 0;
-  return <>{splitMermaid(props.text).map((part, index) => part.kind === "pending" ? <pre key={index}>{part.text}</pre> : part.kind === "mermaid"
+  return <div className="qa-markdown-response">{splitMermaid(props.text).map((part, index) => part.kind === "pending" ? <pre key={index}>{part.text}</pre> : part.kind === "mermaid"
     ? ++charts <= 6 ? <MermaidDiagram key={index} source={part.text} /> : <pre key={index}>{part.text}</pre>
-    : <HostMarkdown key={index} {...props} text={part.text} />)}</>;
+    : <HostMarkdown key={index} {...props} text={part.text} />)}</div>;
 }
 
 const messageTime = new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });

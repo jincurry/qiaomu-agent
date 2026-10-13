@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
-import { activeNoteBlock, buildSystemPrompt, OBSIDIAN_CONVENTIONS, selectionBlock, xmlAttr } from "../src/services/agent-prompt";
-import { promptWithContext } from "../src/services/cli-profiles";
+import { activeNoteBlock, buildSystemPrompt, OBSIDIAN_CONVENTIONS, RESPONSE_CONVENTIONS, selectionBlock, xmlAttr } from "../src/services/agent-prompt";
+import { CLI_PROFILES, promptWithContext } from "../src/services/cli-profiles";
 import { buildApiMessages } from "../src/services/api-backend";
 import type { ChatRequest } from "../src/types";
 
@@ -30,4 +30,14 @@ it("sends the selection to both local agents and model APIs", () => {
   expect(cli.indexOf("<editor_selection")).toBeLessThan(cli.indexOf("把这段改得更简洁"));
   const api = JSON.stringify(buildApiMessages(request));
   expect(api).toContain("editor_selection");
+});
+
+it("carries paragraph guidance to CLI while leaving explicit output instructions last", () => {
+  const instruction = "只返回 JSON，不加其他文字";
+  const systemPrompt = buildSystemPrompt(instruction);
+  const request = { ...base, systemPrompt };
+  for (const id of ["codex", "claude", "kimi", "qwen", "grok", "opencode", "pi", "gemini", "antigravity"])
+    expect(CLI_PROFILES.find(p => p.id === id)!.buildArgs(request).join("\n")).toContain(RESPONSE_CONVENTIONS);
+  expect(systemPrompt.indexOf(RESPONSE_CONVENTIONS)).toBeLessThan(systemPrompt.indexOf(instruction));
+  expect(RESPONSE_CONVENTIONS).toContain("not verbatim quotes, replacement note text, poetry or machine-readable output");
 });

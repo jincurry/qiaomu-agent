@@ -28,3 +28,11 @@ it("orders menu groups by scene, and a daily note also gets note prompts", () =>
   expect(starterGroups("vault")).toEqual(["vault"]);
   expect(starterGroups("reading", true)).toEqual(["reading", "selection", "daily", "note", "vault"]);
 });
+
+it("asks for exactly three sentences as separate paragraphs in the reading shortcut", () => {
+  const prompt = STARTER_PROMPTS.reading.find(p => p.id === "read-three")!;
+  expect(prompt.body).toContain("严格三句话");
+  expect(prompt.body).toContain("每句独立一段");
+  expect(prompt.body).toContain("段落之间留一个空行");
+  expect(prompt.body).toContain("不加标题或编号");
+});
