@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiBackend } from "../src/services/api-backend";
 import { DEFAULT_SETTINGS } from "../src/defaults";
+import { buildSystemPrompt, RESPONSE_CONVENTIONS } from "../src/services/agent-prompt";
 import type { ChatRequest } from "../src/types";
 
 const request: ChatRequest = { prompt: "你好", systemPrompt: "测试", cwd: null, permissionMode: "plan", history: [] };
@@ -15,12 +16,13 @@ describe("API streaming transport", () => {
     const fetcher = vi.fn().mockResolvedValue(new Response(chunks.map((c) => `data: ${JSON.stringify(c)}\n\n`).join("") + "data: [DONE]\n\n", { headers: { "content-type": "text/event-stream" } }));
     vi.stubGlobal("fetch", fetcher);
     const cb = callbacks();
-    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "siliconflow", model: "test" }, "fake").send({ ...request, modelOptions: { temperature: 0.7, maxOutputTokens: 4096 } }, cb, new AbortController().signal);
+    await new ApiBackend({ ...DEFAULT_SETTINGS.api, provider: "siliconflow", model: "test" }, "fake").send({ ...request, systemPrompt: buildSystemPrompt("用中文回答"), modelOptions: { temperature: 0.7, maxOutputTokens: 4096 } }, cb, new AbortController().signal);
     expect(cb.onText.mock.calls.flat().join("")).toBe("中文回复");
     const [url, init] = fetcher.mock.calls[0]!;
     expect(String(url)).toMatch(/\/chat\/completions$/);
     expect(JSON.parse(init.body).model).toBe("test");
     expect(JSON.parse(init.body).stream).toBe(true);
+    expect(JSON.parse(init.body).messages[0].content).toContain(RESPONSE_CONVENTIONS);
     expect(JSON.parse(init.body)).toMatchObject({ temperature: 0.7, max_tokens: 4096 });
   });
   it.each([

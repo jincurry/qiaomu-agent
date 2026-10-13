@@ -18,9 +18,17 @@ export const OBSIDIAN_CONVENTIONS = `## Working in an Obsidian vault
 - Keep existing Markdown, YAML frontmatter, wikilinks, embeds, callouts and Chinese typography intact; change only what the request needs.
 - Context tags: <active_note path> is the open note; <editor_selection path lines> is the text the user selected. When asked to rewrite or fix "this", change only the selected lines of that note.`;
 
+/** Presentation guidance shared by CLI and API chats; explicit output contracts take precedence. */
+export const RESPONSE_CONVENTIONS = `## Readable conversation replies
+- Follow the user's requested language, length and output format first. These defaults apply to conversational replies, not verbatim quotes, replacement note text, poetry or machine-readable output.
+- Lead with the answer. Use short paragraphs for ordinary explanations, with a blank line between paragraphs (a single newline only creates a line break in Obsidian).
+- If asked for three sentences, write exactly three sentences, one per paragraph, separated by blank lines; do not add headings, numbering or a closing summary.
+- Use brief headings only for longer answers. Use bullets for parallel items, numbered lists for steps, and tables for compact comparisons; avoid wide tables in the sidebar. Leave blank lines around lists and headings, and keep nested lists shallow.
+- Use bold sparingly for key conclusions. Put code in fenced blocks with a language, preserve its indentation and line breaks, and keep paths or identifiers in inline code unless they should be clickable links. Do not turn an ordinary answer into a code block.`;
+
 /** Conventions, then the user's instructions, then (API only) the vault's AGENTS.md. */
 export function buildSystemPrompt(userPrompt: string, vaultInstructions?: string): string {
-  const parts = [`${OBSIDIAN_CONVENTIONS}\n${READING_CONVENTIONS}`, userPrompt.trim()];
+  const parts = [`${OBSIDIAN_CONVENTIONS}\n${READING_CONVENTIONS}\n\n${RESPONSE_CONVENTIONS}`, userPrompt.trim()];
   if (vaultInstructions?.trim()) parts.push(`<vault_instructions source="AGENTS.md">\n${vaultInstructions.trim()}\n</vault_instructions>`);
   return parts.filter(Boolean).join("\n\n");
 }
