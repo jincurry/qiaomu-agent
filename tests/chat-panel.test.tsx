@@ -351,9 +351,14 @@ it("shows the context ring only after a reported usage, warning near the limit",
   fireEvent.click(screen.getByRole("button", { name: "新建对话" }));
   expect(props.onNew).toHaveBeenCalledOnce();
 });
-it("header shows the brand and opens plugin settings", () => {
-  const { props } = setup();
-  expect(screen.getByText("Agent")).toBeTruthy();
+it("header names the conversation, not a second brand, and its icon buttons carry host tooltips", () => {
+  const { props, container, rerender } = setup();
+  // The sidebar tab already identifies the view.
+  expect(screen.queryByText("Agent")).toBeNull();
+  expect(container.querySelector(".qa-title.is-new")?.textContent).toBe("新对话");
+  rerender(<ChatPanel {...props} conversationTitle="整理读书笔记" />);
+  expect(container.querySelector(".qa-title:not(.is-new)")?.textContent).toBe("整理读书笔记");
+  for (const name of ["历史对话", "新对话", "设置"]) expect(screen.getByRole("button", { name }).getAttribute("aria-label")).toBe(name);
   fireEvent.click(screen.getByRole("button", { name: "设置" }));
   expect(props.onOpenSettings).toHaveBeenCalled();
 });

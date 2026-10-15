@@ -36,7 +36,7 @@ The chat sidebar should feel like a focused part of Obsidian, not an embedded we
 
 - The first prompt supplies the conversation title; long titles truncate.
 - No permanent provider, protocol, or unverified green connection indicator.
-- Secondary icons are connection setup, history and new conversation.
+- Secondary icons are history, new conversation and settings; the title is the conversation, not a repeated brand.
 
 ### Connection center
 
@@ -192,6 +192,18 @@ Reference: Raycast AI Commands (one press runs a prompt; `{argument}` asks befor
 - Scene prompts are on by default; the bundled 乔木精选 (50) and a curated Yao Open Prompts set (31, CC BY 4.0, credited in the panel) are off until turned on. ai-boost (GPL-3.0) and image prompts are not bundled. `tools/import-quickprompt.mjs` regenerates `src/prompts/library.json` from a Qiaomu-QuickPrompt checkout.
 - The user's prompts are Markdown files in one visible folder (default `Qiaomu Agent/Prompts`, created with the first saved prompt): frontmatter `id`, `title`, `category`, `tags`, `run`; the body is the prompt. Editing a built-in prompt saves a file with the built-in id, which replaces it until 恢复默认 trashes the file. Enabled, pinned and usage state stays in plugin settings. Hand edits and synced changes reload automatically.
 - Each enabled prompt is also a palette command (运行 Prompt：…) so it can take a hotkey, plus 运行 Prompt… to pick any of them. Before 0.5, saved templates and edited quick prompts moved to files once on load.
+
+### Sidebar polish (October 14)
+
+Measured in a browser preview built from the real `ChatPanel`, Obsidian 1.14.4 `app.css`, and LXGW WenKai/system fonts at 280, 380 and 640 px, light and dark.
+
+- The panel owns its insets. The host's `.workspace-leaf-content .view-content` padding (12 px sides, 32 px bottom) is more specific than the old `padding: 0`; it doubled the side inset and left about 46 px empty under the composer. The `use-stick-to-bottom` gutter is kept on the scrollbar side only, so text starts at 20 px on every platform and lines up with the header title.
+- The header carries the conversation title (13 px, 600; `新对话` muted when empty). The tab icon already names the view, so the second `Agent` brand is gone. Header icons are 16 px in 28 px targets with `aria-label` host tooltips, and all Lucide icons use the host `--icon-stroke`.
+- A hairline appears under the header once the transcript scrolls, and above the composer while reading history (CSS scroll timeline, no script; unsupported engines show no line).
+- A question and its answer form one turn: the user's time/copy/edit row floats in the gap below the bubble when a pointer is present, instead of keeping 34 px open. Touch keeps it in flow. Reply actions align with the text edge.
+- The running row keeps its chevron next to the label, like `已处理`.
+- Tables use horizontal rules only, with start-aligned muted headers. Obsidian's injected code copy button (styled by the host only inside `.markdown-rendered`) sits top-right, appearing on hover or focus and always on touch.
+- Prompt chips above the composer are filled and borderless; overflow fades instead of clipping, with no scrollbar (全部 Prompt lists everything). The composer starts at two lines. Prose uses `text-wrap: pretty` to avoid one-character last lines.
 
 ## 对话配色
 

@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, Keymap, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Settings, TreeDeciduous, Globe, Newspaper, Shapes, Plug } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Settings, Globe, Newspaper, Shapes, Plug } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { PermissionMode, ChatAttachment, SentPrompt, QuestionAnswers } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -307,16 +307,17 @@ export function ChatPanel(props: Props) {
     const selected = rendered[clicked] ?? rendered.find((item) => item.id === image.id || item.url === image.url) ?? image;
     new ConversationImageLightbox(props.app, all, all.find((item) => identity(item) === identity(selected)) ?? selected, props.imageTargetNote, addReferenceImage).open();
   };
+  const heading = props.conversationTitle || (title ? messageText(title).split("\n")[0]?.slice(0, 60) : "");
   return <>
+    {/* The sidebar tab already names the view; the header carries the conversation instead of a second brand. */}
     <header className="qa-header">
-      <div className="qa-title-wrap"><div className="qa-title"><TreeDeciduous className="qa-brand-icon" size={16} aria-hidden="true" /><span className="qa-brand">Agent</span>
-          <span className="qa-conversation-title">{props.conversationTitle || (title ? messageText(title).split("\n")[0]?.slice(0, 60) : "新对话")}</span></div>
+      <div className="qa-title-wrap"><div className={`qa-title${heading ? "" : " is-new"}`}><span className="qa-conversation-title" title={heading || undefined}>{heading || "新对话"}</span></div>
         {props.branch && <button type="button" className="qa-branch-parent" disabled={running} onClick={() => props.onOpenParent(props.branch!.parentId)}>
           <GitBranch size={12} /><span>返回原对话 · {props.branch.parentTitle}</span></button>}
       </div>
-      <button type="button" disabled={running} onClick={(e) => props.onHistory(e.nativeEvent)}><History size={17} /><span className="qiaomu-agent__sr-only">历史对话</span></button>
-      <button type="button" disabled={running} onClick={props.onNew}><SquarePen size={17} /><span className="qiaomu-agent__sr-only">新对话</span></button>
-      <button type="button" onClick={props.onOpenSettings}><Settings size={17} /><span className="qiaomu-agent__sr-only">设置</span></button>
+      <button type="button" className="qa-header-action" aria-label="历史对话" data-tooltip-position="bottom" disabled={running} onClick={(e) => props.onHistory(e.nativeEvent)}><History size={16} /></button>
+      <button type="button" className="qa-header-action" aria-label="新对话" data-tooltip-position="bottom" disabled={running} onClick={props.onNew}><SquarePen size={16} /></button>
+      <button type="button" className="qa-header-action" aria-label="设置" data-tooltip-position="bottom" onClick={props.onOpenSettings}><Settings size={16} /></button>
     </header>
     <Conversation>
       <ConversationContent onClick={(event) => {
