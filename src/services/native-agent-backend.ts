@@ -18,6 +18,7 @@ import { promptWithContext } from "./cli-profiles";
 import { acpContextUsage, codexContextUsage } from "./context-usage";
 import { JsonRpcProcess } from "./json-rpc-process";
 import { getRuntimeRequire } from "./runtime-require";
+import { shellRisk } from "./local-guard";
 import { acpElicitationQuestions, acpElicitationResponse, codexQuestionRequest, codexQuestionResponse } from "./user-questions";
 
 const ACP_AGENTS = new Set(["gemini", "opencode", "qwen", "kimi", "cursor", "cline", "auggie", "hermes", "openclaw"]);
@@ -135,6 +136,8 @@ export class NativeAgentBackend implements ChatBackend {
   private prompted = false;
   private mediaTasks: Promise<void>[] = [];
   private emittedMedia = new Set<string>();
+  /** Latest fields of each tool call; a permission request may name only the call. */
+  private readonly toolCalls = new Map<string, Record<string, unknown>>();
 
   isBusy(): boolean { return this.activeCallbacks !== null; }
 
@@ -226,6 +229,7 @@ export class NativeAgentBackend implements ChatBackend {
     this.reasoning.clear();
     this.mediaTasks = [];
     this.emittedMedia.clear();
+    this.toolCalls.clear();
     this.activePermissionMode = request.permissionMode;
     let cancelTimer: ReturnType<typeof setTimeout> | undefined;
     const abort = (): void => {
@@ -508,6 +512,7 @@ export class NativeAgentBackend implements ChatBackend {
       const id = typeof update.toolCallId === "string" ? update.toolCallId : `tool-${Date.now()}`;
       const intents = acpFileIntents(update);
       if (intents.length) this.activeCallbacks?.onFileIntent?.(intents);
+      this.toolCalls.set(id, { ...this.toolCalls.get(id), ...update });
       const label = typeof update.title === "string" ? update.title : typeof update.name === "string" ? update.name : "工具调用";
       // Reads and searches fold into one "已探索" row; titles already say what other tools did, so they stay as given.
       const explore = update.kind === "read" ? "read" : update.kind === "search" ? "search" : null;
@@ -569,11 +574,20 @@ export class NativeAgentBackend implements ChatBackend {
       const ask = this.activeCallbacks?.requestApproval;
       if (!ask) { select(pick(["allow_once", "allow_always"])); return; }
       const toolCall = record(record(params)?.toolCall);
+      const callId = stringAt(toolCall, "toolCallId");
+      const known = { ...(callId ? this.toolCalls.get(callId) : undefined), ...toolCall };
+      const writes = [...new Set(acpFileIntents(known).filter((intent) => !intent.read).map((intent) => intent.path))];
+      const command = acpCommand(known);
+      const risk = command ? commandRisk(command) : null;
+      // Full access allows what the agent asks, short of the floor the local tools also keep.
+      if (this.activePermissionMode === "full" && !risk) { select(pick(["allow_once", "allow_always"])); return; }
+      const detail = toolDetail(toolCall?.content) ?? (arrayAt(toolCall, "locations").map((l) => stringAt(l, "path")).filter(Boolean).join("\n") || undefined);
       void ask({
         id: `acp-${String(id)}`,
         title: stringAt(toolCall, "title") || "Agent 请求执行操作",
-        detail: toolDetail(toolCall?.content) ?? (arrayAt(toolCall, "locations").map((l) => stringAt(l, "path")).filter(Boolean).join("\n") || undefined),
-        options: options.filter((o) => typeof o.optionId === "string").map((o) => ({ id: String(o.optionId), label: OPTION_LABELS[String(o.kind)] ?? String(o.name || o.kind), kind: String(o.kind) as ApprovalOptionKind })),
+        detail: risk ? [`风险：${risk}`, detail ?? command].join("\n") : detail,
+        options: riskyOptions(options.filter((o) => typeof o.optionId === "string").map((o) => ({ id: String(o.optionId), label: OPTION_LABELS[String(o.kind)] ?? String(o.name || o.kind), kind: String(o.kind) as ApprovalOptionKind })), risk),
+        ...(writes.length ? { writes } : {}),
       }).then((chosen) => select(chosen ? options.find((o) => o.optionId === chosen) : undefined), () => select(undefined));
       return;
     }
@@ -613,7 +627,11 @@ export class NativeAgentBackend implements ChatBackend {
     const host = this.activeCallbacks?.host;
     const path = stringAt(params, "path");
     if (!host || !path) throw new Error("当前没有可用的文件访问");
-    if (method === "fs/read_text_file") {
+    const write = method === "fs/write_text_file";
+    if (write && this.activePermissionMode === "plan") throw new Error("当前为只读模式，不能写入文件");
+    const caution = await host.caution?.(path, write);
+    if (caution) await this.confirm(caution);
+    if (!write) {
       const content = await host.readText(path);
       const line = record(params)?.line;
       const limit = record(params)?.limit;
@@ -622,18 +640,45 @@ export class NativeAgentBackend implements ChatBackend {
       const start = typeof line === "number" ? Math.max(0, line - 1) : 0;
       return { content: lines.slice(start, typeof limit === "number" ? start + limit : undefined).join("\n") };
     }
-    if (this.activePermissionMode === "plan") throw new Error("当前为只读模式，不能写入文件");
     const content = stringAt(params, "content");
     if (content === null) throw new Error("缺少写入内容");
     await host.writeText(path, content);
     return null;
+  }
+
+  /** Host safety prompts offer no "always", so a conversation that allows everything still asks. */
+  private async confirm(request: { title: string; detail: string }): Promise<void> {
+    const ask = this.activeCallbacks?.requestApproval;
+    const choice = ask ? await ask({ id: `fs-${crypto.randomUUID()}`, ...request, options: [
+      { id: "allow", label: "允许", kind: "allow_once" },
+      { id: "reject", label: "拒绝", kind: "reject_once" },
+    ] }) : null;
+    if (choice !== "allow") throw new Error("用户没有允许这个操作");
   }
 }
 
 /** request_user_input is otherwise limited to Codex's Plan mode; the sidebar answers it in every mode. */
 export const CODEX_FEATURES = ["-c", "features.default_mode_request_user_input=true"];
 
-const OPTION_LABELS: Record<string, string> = { allow_once: "允许一次", allow_always: "本次会话都允许", reject_once: "拒绝", reject_always: "始终拒绝" };
+/** The shell command a tool call runs, when the agent names one. */
+export function acpCommand(toolCall: Record<string, unknown>): string | null {
+  const command = record(toolCall.rawInput)?.command;
+  if (typeof command === "string") return command;
+  if (Array.isArray(command)) return command.join(" ");
+  return toolCall.kind === "execute" ? stringAt(toolCall, "title") : null;
+}
+
+/** Why a command needs a person to look at it; the local tools' advice to use their own delete tool does not apply here. */
+function commandRisk(command: string): string | null {
+  return shellRisk(command)?.replace(/（[^）]*）$/, "") ?? null;
+}
+
+/** A risky command is decided one at a time: no "always", so neither access level nor a conversation allows it unseen. */
+function riskyOptions(options: ApprovalRequest["options"], risk: string | null): ApprovalRequest["options"] {
+  return risk ? options.filter((option) => option.kind !== "allow_always") : options;
+}
+
+const OPTION_LABELS: Record<string, string> = { allow_once: "允许一次", allow_always: "本对话都允许", reject_once: "拒绝", reject_always: "始终拒绝" };
 
 const CODEX_APPROVALS: Record<string, { decision: Record<"accept" | "session" | "decline" | "cancel", string> }> = {
   "item/commandExecution/requestApproval": { decision: { accept: "accept", session: "acceptForSession", decline: "decline", cancel: "cancel" } },
@@ -649,7 +694,7 @@ export function codexApprovalPolicy(mode: PermissionMode): "never" | "on-request
 
 const APPROVAL_OPTIONS: ApprovalRequest["options"] = [
   { id: "allow_once", label: "允许一次", kind: "allow_once" },
-  { id: "allow_always", label: "本次会话都允许", kind: "allow_always" },
+  { id: "allow_always", label: "本对话都允许", kind: "allow_always" },
   { id: "reject_once", label: "拒绝", kind: "reject_once" },
 ];
 
@@ -658,11 +703,12 @@ export function codexApprovalRequest(method: string, params: unknown, id: string
   const command = stringAt(params, "command") ?? (Array.isArray(record(params)?.command) ? (record(params)!.command as unknown[]).join(" ") : null);
   const isCommand = method.includes("ommand") || method === "execCommandApproval";
   const root = stringAt(params, "grantRoot");
+  const risk = command ? commandRisk(command) : null;
   return {
     id: `codex-${id}`,
     title: isCommand ? "Codex 请求执行命令" : "Codex 请求写入文件",
-    detail: [command, root ? `申请写入：${root}` : null, reason].filter(Boolean).join("\n") || undefined,
-    options: APPROVAL_OPTIONS,
+    detail: [risk ? `风险：${risk}` : null, command, root ? `申请写入：${root}` : null, reason].filter(Boolean).join("\n") || undefined,
+    options: riskyOptions(APPROVAL_OPTIONS, risk),
   };
 }
 

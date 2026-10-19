@@ -164,11 +164,17 @@ export interface ApprovalRequest {
   title: string;
   detail?: string;
   options: Array<{ id: string; label: string; kind: ApprovalOptionKind }>;
+  /** Files the request would write, when the agent names them. */
+  writes?: string[];
 }
 
 export interface ApprovalState extends ApprovalRequest {
   status: "pending" | "decided" | "cancelled";
   chosen?: string;
+  /** Allowed without asking: the conversation already allows every request. */
+  auto?: boolean;
+  /** Refused by the host without asking; why, for the user. */
+  blocked?: string;
 }
 
 /** One question the agent asks the user mid-turn (Claude Code AskUserQuestion, Codex request_user_input). */
@@ -284,7 +290,12 @@ export interface ChatCallbacks {
   /** Ask the user one or more questions; resolves with the answers, or null when dismissed or cancelled. */
   requestUserInput?: (request: QuestionRequest) => Promise<QuestionAnswers | null>;
   /** Host file access for protocols that route reads/writes through the client (ACP fs). */
-  host?: { readText(path: string): Promise<string>; writeText(path: string, content: string): Promise<void> };
+  host?: {
+    readText(path: string): Promise<string>;
+    writeText(path: string, content: string): Promise<void>;
+    /** What the user must confirm before this access, or null. */
+    caution?(path: string, write: boolean): Promise<{ title: string; detail: string } | null>;
+  };
 }
 
 /** Transient media returned by a model or native agent before it is imported into the vault. */

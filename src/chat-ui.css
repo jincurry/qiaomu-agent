@@ -93,6 +93,9 @@
 .qiaomu-agent--react code.qa-step-target { padding: 0; background: none; font-size: 12px; }
 .qiaomu-agent--react .qa-step.is-failed .qa-step-target { color: var(--text-muted); }
 .qiaomu-agent--react .qa-step-failed { flex: none; display: inline-flex; color: var(--text-error); }
+.qiaomu-agent--react .qa-step-failed[role="alert"] { gap: 4px; align-items: flex-start; }
+.qiaomu-agent--react .qa-step-failed[role="alert"] > svg { margin-top: 3px; flex: none; }
+.qiaomu-agent--react .qa-step-failed-reason { display: block; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
 .qiaomu-agent--react .qa-step-note { flex: none; color: var(--text-faint); font-size: 12px; }
 .qiaomu-agent--react .qa-diffstat { flex: none; display: inline-flex; gap: 4px; font-family: var(--font-monospace); font-size: 12px; }
 .qiaomu-agent--react .qa-diffstat .is-added { color: var(--color-green); }
@@ -196,8 +199,8 @@
 .qiaomu-agent--react .qa-submit:hover { background: var(--text-muted); }
 @media (pointer: coarse) { .qiaomu-agent--react button, .qiaomu-agent--react select { min-height: 40px; } }
 @media (pointer: coarse) { .qiaomu-agent--react .is-assistant .qa-message-actions, .qiaomu-agent--react .qa-user-message-meta { opacity: 1; pointer-events: auto; } }
-/* Access is icon-only; full access keeps a warning tint so the risk stays visible without a label. */
-.qiaomu-agent--react .qa-prompt-footer .qa-permission-control.is-full .qa-control-trigger { color: var(--text-warning); }
+/* Access is icon-only; full access and a conversation that allows everything keep a warning tint so the risk stays visible without a label. */
+.qiaomu-agent--react .qa-prompt-footer .qa-permission-control:is(.is-full, .is-allow-all) .qa-control-trigger { color: var(--text-warning); }
 .qiaomu-agent--react .qa-attachments { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .qiaomu-agent--react .qa-attachment { display: flex; align-items: center; gap: 6px; padding: 5px 7px; border: 1px solid var(--background-modifier-border); border-radius: 8px; max-width: 100%; font-size: 12px; }
 .qiaomu-agent--react .qa-attachment img { object-fit: cover; border-radius: 5px; flex-shrink: 0; }

@@ -153,12 +153,13 @@ export class ZcodeAppServer {
         id: `zcode-${String(id)}`,
         title: String(object(params).toolName ?? "ZCode 请求执行操作"),
         detail: String(object(params).reason ?? ""),
-        options: options.filter((option) => typeof option.optionId === "string").map((option) => ({
-          id: String(option.optionId), label: String(option.name ?? option.kind ?? option.optionId),
-          kind: (/^allow/.test(String(option.kind ?? option.optionId))
+        // Any "always" choice now means this conversation, so one such button is enough.
+        options: options.filter((option) => typeof option.optionId === "string").map((option) => {
+          const kind = (/^allow/.test(String(option.kind ?? option.optionId))
             ? /always|project/.test(String(option.kind ?? option.optionId)) ? "allow_always" : "allow_once"
-            : "reject_once") as "allow_once" | "allow_always" | "reject_once",
-        })),
+            : "reject_once") as "allow_once" | "allow_always" | "reject_once";
+          return { id: String(option.optionId), label: kind === "allow_always" ? "本对话都允许" : String(option.name ?? option.kind ?? option.optionId), kind };
+        }).filter((option, index, all) => option.kind !== "allow_always" || all.findIndex((other) => other.kind === "allow_always") === index),
       }).then((chosen) => {
         const selected = options.find((option) => option.optionId === chosen);
         const response = object(selected?.response);

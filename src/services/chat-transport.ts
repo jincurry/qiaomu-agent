@@ -12,11 +12,25 @@ export interface TurnHooks {
   onFileIntent?: ChatCallbacks["onFileIntent"];
   host?: ChatCallbacks["host"];
   awaitApproval?: (request: ApprovalRequest, signal: AbortSignal) => Promise<string | null>;
+  /** The conversation already allows every request that offers "always". */
+  allowsAll?: () => boolean;
+  /** Why the host refuses a request without asking, or null when the user decides. */
+  refuse?: (request: ApprovalRequest) => string | null;
   awaitAnswers?: (request: QuestionRequest, signal: AbortSignal) => Promise<QuestionAnswers | null>;
   /** Collects what the turn changed; called once, also after errors and aborts. */
   finish?: () => Promise<FileChange[]>;
   /** Receives changes the stream could no longer carry (the turn was stopped). */
   onLateChanges?: (changes: FileChange[]) => void;
+}
+
+/**
+ * How a conversation that allows everything answers: once per request, because an agent's own
+ * "always" is scoped by that agent (one exact command for Codex, a saved rule for others).
+ * Null when the request offers no "always", such as the host's own safety prompts.
+ */
+export function standingChoice(request: ApprovalRequest): string | null {
+  if (!request.options.some((option) => option.kind === "allow_always")) return null;
+  return (request.options.find((option) => option.kind === "allow_once") ?? request.options.find((option) => option.kind === "allow_always"))!.id;
 }
 
 /** Stored conversations keep file contents only up to this total; larger turns stay listed but not restorable. */
@@ -184,10 +198,23 @@ export class AgentTransport implements ChatTransport<AgentMessage> {
               host: hooks?.host,
               requestApproval: hooks?.awaitApproval ? async (approval) => {
                 endRun();
+                const refusal = hooks.refuse?.(approval);
+                if (refusal) {
+                  // A one-time rejection: the agent should not store a deny rule for what access level forbids.
+                  const reject = approval.options.find((option) => option.kind === "reject_once");
+                  emit({ type: "data-approval", id: approval.id, data: { ...approval, status: "decided", ...(reject ? { chosen: reject.id } : {}), blocked: refusal } });
+                  return reject?.id ?? null;
+                }
+                const standing = standingChoice(approval);
+                if (standing && hooks.allowsAll?.()) {
+                  emit({ type: "data-approval", id: approval.id, data: { ...approval, status: "decided", chosen: standing, auto: true } });
+                  return standing;
+                }
                 emit({ type: "data-approval", id: approval.id, data: { ...approval, status: "pending" } });
                 const chosen = await hooks.awaitApproval!(approval, controller.signal).catch(() => null);
                 emit({ type: "data-approval", id: approval.id, data: { ...approval, status: chosen ? "decided" : "cancelled", ...(chosen ? { chosen } : {}) } });
-                return chosen;
+                // "Always" is kept by the conversation; the agent itself is answered once.
+                return approval.options.find((option) => option.id === chosen)?.kind === "allow_always" ? standing : chosen;
               } : undefined,
               requestUserInput: hooks?.awaitAnswers ? async (question) => {
                 endRun();

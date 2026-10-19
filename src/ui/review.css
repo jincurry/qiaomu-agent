@@ -8,6 +8,13 @@
 .qiaomu-agent--react .qa-approval-actions button { height: auto; min-height: 30px; padding: 4px 12px; font-size: 12px; border-radius: 8px; }
 .qiaomu-agent--react .qa-approval-actions button.is-reject { color: var(--text-error); }
 .qa-approval-result { margin: 6px 0 0; color: var(--text-muted); font-size: 12px; }
+/* Allowed by the conversation: a quiet one-line record, not a decision. */
+.qiaomu-agent--react .qa-approval.is-auto { padding: 6px 12px; }
+.qa-approval.is-auto .qa-approval-head { font-weight: 400; color: var(--text-muted); }
+.qa-approval.is-auto .qa-approval-head svg { color: var(--text-faint); }
+.qa-approval.is-auto .qa-approval-head > span:first-of-type { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.qa-approval.is-auto .qa-approval-result { margin: 0 0 0 auto; flex: none; }
+.qa-approval.is-blocked .qa-approval-head svg { color: var(--text-error); }
 
 .qiaomu-agent--react .qa-changes { margin: 12px 0 4px; border: 1px solid var(--background-modifier-border); border-radius: 12px; overflow: hidden; }
 .qiaomu-agent--react .qa-changes > summary { display: flex; align-items: center; gap: 8px; padding: 8px 12px; cursor: pointer; list-style: none; font-size: 13px; color: var(--text-normal); }

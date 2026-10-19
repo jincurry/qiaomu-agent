@@ -62,11 +62,11 @@ export function startupPath(path: string, home: string): string | null {
 
 const SHELL_RULES: Array<[RegExp, string]> = [
   [/(^|[\s;&|(`])(sudo|su|doas)\s/, "需要管理员权限"],
-  [/(^|[\s;&|(`])(rm|rmdir|unlink|shred|srm)\s|\s-delete\b|\bgit\s+clean\b/, "直接删除不会进废纸篓（请改用 delete_path）"],
+  [/(^|[\s;&|(`])(rm|rmdir|unlink|shred|srm)\s|\s-delete\b|\bgit\s+clean\b|(^|[\s;&|(`])(del|erase|rd|remove-item)\s/i, "直接删除不会进废纸篓（请改用 delete_path）"],
   [/\b(mkfs|newfs|fdisk|diskutil\s+(erase|partition|zero|secureerase|apfs\s+delete)|format\s+[a-z]:)/i, "会格式化或改动磁盘"],
   [/\bdd\b[^|;&]*\bof=\/dev\//, "直接写入磁盘设备"],
   [/:\s*\(\s*\)\s*\{[^}]*:\s*\|\s*:/, "会耗尽系统资源"],
-  [/\b(shutdown|reboot|halt|poweroff)\b/, "会关机或重启"],
+  [/\b(shutdown|reboot|halt|poweroff|stop-computer|restart-computer)\b/i, "会关机或重启"],
   [/\b(curl|wget)\b[^|;&]*\|\s*(sudo\s+)?(sh|bash|zsh|fish|python3?|node|perl|ruby)\b/, "下载并直接执行远程脚本"],
   [/\bchmod\s+(-R|--recursive)\b|\bchown\s+(-R|--recursive)\b/, "递归修改权限或所有者"],
   [/\bgit\s+(reset\s+--hard|checkout\s+--\s|restore\s+\.|stash\s+(drop|clear))|\bgit\s+push\b[^;&|]*(\s-f\b|--force)/, "会丢弃未提交的改动或强推"],

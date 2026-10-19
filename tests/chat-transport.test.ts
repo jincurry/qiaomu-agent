@@ -1,4 +1,4 @@
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { AgentTransport, fromStoredMessage, toStoredMessage } from "../src/services/chat-transport";
 import type { ChatRequest } from "../src/types";
 const request: ChatRequest = { prompt: "hello", systemPrompt: "", cwd: null, permissionMode: "plan", history: [] };
@@ -73,6 +73,40 @@ it("carries approvals and the turn's file changes, and persists changes with a s
   expect(stored.changes?.files[0]).toEqual(change);
   expect(stored.changes?.files[1]).toMatchObject({ path: "big.md", tracked: false, before: null });
   expect(fromStoredMessage(stored).parts.find((p) => p.type === "data-changes")).toBeTruthy();
+});
+it("keeps a conversation-wide approval in the host and answers the agent once per request", async () => {
+  const session = [{ id: "o1", label: "允许一次", kind: "allow_once" as const }, { id: "o2", label: "本对话都允许", kind: "allow_always" as const }, { id: "o3", label: "拒绝", kind: "reject_once" as const }];
+  const hostOnly = [{ id: "allow", label: "允许", kind: "allow_once" as const }, { id: "reject", label: "拒绝", kind: "reject_once" as const }];
+  let allowsAll = false; const asked: string[] = []; const answers: Array<string | null | undefined> = [];
+  const transport = new AgentTransport(async () => ({ request, backend: { id: "cli:test", label: "test", async send(_, c) {
+    answers.push(await c.requestApproval?.({ id: "p1", title: "运行 npm test", options: session }));
+    answers.push(await c.requestApproval?.({ id: "p2", title: "运行 git fetch", options: session }));
+    answers.push(await c.requestApproval?.({ id: "p3", title: "写入密钥文件", options: hostOnly }));
+  } }, turn: { allowsAll: () => allowsAll, awaitApproval: async (approval) => {
+    asked.push(approval.id);
+    if (approval.id === "p1") { allowsAll = true; return "o2"; }
+    return approval.id === "p3" ? "reject" : null;
+  } } }));
+  const reader = (await transport.sendMessages(options)).getReader(); const chunks = [];
+  for (;;) { const item = await reader.read(); if (item.done) break; chunks.push(item.value); }
+  expect(asked).toEqual(["p1", "p3"]);
+  expect(answers).toEqual(["o1", "o1", "reject"]);
+  const cards = chunks.filter((c) => c.type === "data-approval").map((c) => (c as { data: { id: string; status: string; chosen?: string; auto?: boolean } }).data);
+  expect(cards.filter((card) => card.id === "p1").map((card) => card.chosen)).toEqual([undefined, "o2"]);
+  expect(cards.filter((card) => card.id === "p2")).toEqual([expect.objectContaining({ status: "decided", chosen: "o1", auto: true })]);
+});
+it("refuses what the access level forbids without asking, with a one-time rejection", async () => {
+  const choices = [{ id: "o1", label: "允许一次", kind: "allow_once" as const }, { id: "o2", label: "本对话都允许", kind: "allow_always" as const }, { id: "o3", label: "拒绝", kind: "reject_once" as const }, { id: "o4", label: "始终拒绝", kind: "reject_always" as const }];
+  const awaitApproval = vi.fn(async () => "o1");
+  let answer: string | null | undefined;
+  const transport = new AgentTransport(async () => ({ request, backend: { id: "cli:test", label: "test", async send(_, c) {
+    answer = await c.requestApproval?.({ id: "p1", title: "Write", options: choices, writes: ["C:\\Temp\\a.txt"] });
+  } }, turn: { awaitApproval, allowsAll: () => true, refuse: (approval) => approval.writes?.length ? "不能写入库外文件" : null } }));
+  const reader = (await transport.sendMessages(options)).getReader(); const chunks = [];
+  for (;;) { const item = await reader.read(); if (item.done) break; chunks.push(item.value); }
+  expect(awaitApproval).not.toHaveBeenCalled();
+  expect(answer).toBe("o3");
+  expect(chunks.filter((c) => c.type === "data-approval").map((c) => (c as { data: unknown }).data)).toEqual([expect.objectContaining({ status: "decided", chosen: "o3", blocked: "不能写入库外文件" })]);
 });
 it("reports changes of a stopped turn after its stream closed", async () => {
   let late: unknown = null;

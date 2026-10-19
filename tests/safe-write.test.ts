@@ -167,10 +167,11 @@ describe("agent protocol hooks", () => {
     expect(codexApprovalPolicy("plan")).toBe("never");
     expect(codexApprovalPolicy("edit")).toBe("on-request");
     expect(codexApprovalPolicy("full")).toBe("never");
-    expect(codexApprovalRequest("item/commandExecution/requestApproval", { command: "rm -rf build", reason: "清理" }, "7")).toMatchObject({ id: "codex-7", title: "Codex 请求执行命令", detail: "rm -rf build\n清理" });
+    expect(codexApprovalRequest("item/commandExecution/requestApproval", { command: "rm -rf build", reason: "清理" }, "7")).toMatchObject({ id: "codex-7", title: "Codex 请求执行命令", detail: "风险：直接删除不会进废纸篓\nrm -rf build\n清理" });
+    expect(codexApprovalRequest("item/commandExecution/requestApproval", { command: "npm test" }, "9")).toMatchObject({ detail: "npm test", options: [{ kind: "allow_once" }, { kind: "allow_always" }, { kind: "reject_once" }] });
   });
 
-  function backendWith(agent: string, mode: "plan" | "edit", callbacks: Partial<ChatCallbacks>) {
+  function backendWith(agent: string, mode: "plan" | "edit" | "full", callbacks: Partial<ChatCallbacks>) {
     const backend = new NativeAgentBackend({ id: agent, label: agent, command: agent, path: `/bin/${agent}`, version: "1", available: true, callable: true });
     const replies: Array<{ id: unknown; result?: unknown; error?: unknown }> = [];
     Object.assign(backend as object, {
@@ -178,8 +179,10 @@ describe("agent protocol hooks", () => {
       activeCallbacks: { onText: () => undefined, onStatus: () => undefined, ...callbacks },
       activePermissionMode: mode,
     });
-    const handle = (id: number, method: string, params: unknown) => (backend as unknown as { handleServerRequest(id: number, method: string, params: unknown): void }).handleServerRequest(id, method, params);
-    return { handle, replies };
+    const internals = backend as unknown as { handleServerRequest(id: number, method: string, params: unknown): void; handleNotification(method: string, params: unknown): void };
+    const handle = (id: number, method: string, params: unknown) => internals.handleServerRequest(id, method, params);
+    const notify = (method: string, params: unknown) => internals.handleNotification(method, params);
+    return { handle, notify, replies };
   }
   const permission = { toolCall: { title: "运行 npm test", content: [] }, options: [
     { optionId: "o1", name: "Allow", kind: "allow_once" }, { optionId: "o2", name: "Always", kind: "allow_always" }, { optionId: "o3", name: "Reject", kind: "reject_once" },
@@ -190,7 +193,7 @@ describe("agent protocol hooks", () => {
     const { handle, replies } = backendWith("qwen", "edit", { requestApproval });
     handle(1, "session/request_permission", permission);
     await vi.waitFor(() => expect(replies).toHaveLength(1));
-    expect(requestApproval.mock.calls[0]![0]).toMatchObject({ title: "运行 npm test", options: [{ id: "o1", label: "允许一次" }, { id: "o2", label: "本次会话都允许" }, { id: "o3", label: "拒绝" }] });
+    expect(requestApproval.mock.calls[0]![0]).toMatchObject({ title: "运行 npm test", options: [{ id: "o1", label: "允许一次" }, { id: "o2", label: "本对话都允许" }, { id: "o3", label: "拒绝" }] });
     expect(replies[0]).toEqual({ id: 1, result: { outcome: { outcome: "selected", optionId: "o2" } } });
   });
 
@@ -227,6 +230,47 @@ describe("agent protocol hooks", () => {
     handle(5, "execCommandApproval", { command: ["ls"] });
     await vi.waitFor(() => expect(replies).toHaveLength(2));
     expect(replies).toEqual([{ id: 4, result: { decision: "acceptForSession" } }, { id: 5, result: { decision: "approved_for_session" } }]);
+  });
+
+  it("names the files a permission request would write, also when only an earlier tool call did", async () => {
+    const requestApproval = vi.fn(async (_request: unknown) => "o1");
+    const { handle, notify, replies } = backendWith("qwen", "edit", { requestApproval });
+    handle(1, "session/request_permission", { ...permission, toolCall: { toolCallId: "t1", title: "Write", kind: "edit", locations: [{ path: "C:\\Temp\\a.txt" }] } });
+    notify("session/update", { update: { sessionUpdate: "tool_call", toolCallId: "t2", title: "Write", kind: "edit", rawInput: { file_path: "/tmp/b.txt" } } });
+    handle(2, "session/request_permission", { ...permission, toolCall: { toolCallId: "t2", title: "Write" } });
+    handle(3, "session/request_permission", permission);
+    await vi.waitFor(() => expect(replies).toHaveLength(3));
+    expect(requestApproval.mock.calls.map(([request]) => (request as { writes?: string[] }).writes)).toEqual([["C:\\Temp\\a.txt"], ["/tmp/b.txt"], undefined]);
+  });
+
+  it("lets full access through without asking, except risky commands, which never offer \"always\"", async () => {
+    const requestApproval = vi.fn(async (_request: unknown) => "o1");
+    const { handle, notify, replies } = backendWith("qwen", "full", { requestApproval });
+    handle(1, "session/request_permission", { ...permission, toolCall: { toolCallId: "t1", title: "Execute `npm test`", kind: "execute", rawInput: { command: "npm test" } } });
+    notify("session/update", { update: { sessionUpdate: "tool_call", toolCallId: "t2", title: "Execute", kind: "execute", rawInput: { command: "Remove-Item -Recurse -Force C:\\build" } } });
+    handle(2, "session/request_permission", { ...permission, toolCall: { toolCallId: "t2", title: "Execute" } });
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+    expect(replies[0]).toEqual({ id: 1, result: { outcome: { outcome: "selected", optionId: "o1" } } });
+    expect(requestApproval).toHaveBeenCalledOnce();
+    const asked = requestApproval.mock.calls[0]![0] as { detail: string; options: Array<{ kind: string }> };
+    expect(asked.detail).toBe("风险：直接删除不会进废纸篓\nRemove-Item -Recurse -Force C:\\build");
+    expect(asked.options.map((option) => option.kind)).toEqual(["allow_once", "reject_once"]);
+    expect(codexApprovalRequest("item/commandExecution/requestApproval", { command: "git reset --hard" }, "8").options.map((option) => option.kind)).toEqual(["allow_once", "reject_once"]);
+  });
+
+  it("confirms sensitive host paths before ACP file access, even when the conversation allows everything", async () => {
+    const host = { readText: vi.fn(async () => "secret"), writeText: vi.fn(async () => undefined), caution: vi.fn(async () => ({ title: "读取凭据或私人数据目录", detail: "/h/.ssh/id_rsa" })) };
+    const requestApproval = vi.fn(async (_request: { options: Array<{ kind: string }> }) => "reject");
+    const { handle, replies } = backendWith("qwen", "full", { host, requestApproval });
+    handle(9, "fs/read_text_file", { path: "/h/.ssh/id_rsa" });
+    await vi.waitFor(() => expect(replies).toHaveLength(1));
+    expect(requestApproval.mock.calls[0]![0]).toMatchObject({ title: "读取凭据或私人数据目录", options: [{ id: "allow", kind: "allow_once" }, { id: "reject", kind: "reject_once" }] });
+    expect(replies[0]).toMatchObject({ id: 9, error: "用户没有允许这个操作" });
+    expect(host.readText).not.toHaveBeenCalled();
+    requestApproval.mockResolvedValueOnce("allow");
+    handle(10, "fs/read_text_file", { path: "/h/.ssh/id_rsa" });
+    await vi.waitFor(() => expect(replies).toHaveLength(2));
+    expect(replies[1]).toEqual({ id: 10, result: { content: "secret" } });
   });
 
   it("routes ACP file reads and writes through the host and blocks writes when read-only", async () => {

@@ -1,6 +1,6 @@
 import { useChat, type Chat } from "@ai-sdk/react";
 import { Component, Keymap, MarkdownRenderer, Notice, Platform, type App, type TFile } from "obsidian";
-import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, Pencil, GitBranch, BookOpen, Settings, Globe, Newspaper, Shapes, Plug } from "lucide-react";
+import { Check, ChevronDown, ChevronRight, Copy, FileText, FilePlus, Folder, Link, History, Plus, SquarePen, X, CalendarPlus, FilePlus2, Slash, Paperclip, TextSelect, Sparkles, Shield, FolderPen, ShieldAlert, ShieldQuestion, Pencil, GitBranch, BookOpen, Settings, Globe, Newspaper, Shapes, Plug } from "lucide-react";
 import { useEffect, useId, useRef, useState } from "react";
 import type { PermissionMode, ChatAttachment, SentPrompt, QuestionAnswers } from "../types";
 import type { ModelSource } from "../services/model-sources";
@@ -37,7 +37,7 @@ interface Props {
   branch: { parentId: string; parentTitle: string; messageId: string } | null;
   onOpenParent: (id: string) => void; onForkMessage: (messageId: string) => void;
   imageTargetNote: TFile | null;
-  backendLabel: string; skillLabel: string; permission: PermissionMode; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
+  backendLabel: string; skillLabel: string; permission: PermissionMode; allowAll?: boolean; onStopAllowAll?: () => void; fileAccessAvailable: boolean; fullAccessAvailable: boolean; note: TFile | null; detachedNote?: TFile | null;
   statusText: string; prefill: string; prefillVersion: number; submitVersion?: number; focusVersion?: number;
   addRequest?: { kind: AddKind; version: number }; addHotkeys?: Partial<Record<AddKind, string>>;
   onConnection: () => void; onNew: () => void; onOpenSettings: () => void; onHistory: (event: MouseEvent) => void;
@@ -160,6 +160,7 @@ export function ChatPanel(props: Props) {
   const imageEditing = attachments.some((file) => file.intent === "edit");
   const permissionLabel = imageEditing ? "图片编辑只读" : props.permission === "full" ? "完全访问" : props.permission === "edit" ? "可写当前库" : "只读";
   const PermissionIcon = imageEditing ? Shield : props.permission === "full" ? ShieldAlert : props.permission === "edit" ? FolderPen : Shield;
+  const allowAll = Boolean(props.allowAll) && !imageEditing;
   const insertPrompt = (body: string) => {
     const draft = draftBeforePrompts.current ?? (slashQuery(input) === null ? input : null);
     draftBeforePrompts.current = null;
@@ -446,11 +447,15 @@ export function ChatPanel(props: Props) {
               </div>
             </div>}
           </ComposerPopover>
-          {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}`} label={`访问权限：${permissionLabel}`} trigger={<PermissionIcon size={18} />} iconOnly disabled={running || imageEditing}>
+          {props.fileAccessAvailable && <ComposerPopover className={`qa-permission-control is-${imageEditing ? "plan" : props.permission}${allowAll ? " is-allow-all" : ""}`} label={`访问权限：${permissionLabel}${allowAll ? "，本对话自动允许" : ""}`} trigger={<PermissionIcon size={18} />} iconOnly disabled={running || imageEditing}>
             {(close) => <>
               <button type="button" aria-pressed={props.permission === "plan"} onClick={() => { close(); props.onPermission("plan"); }}><Shield size={16} /><span>只读</span>{props.permission === "plan" && <Check size={14} />}</button>
               <button type="button" aria-pressed={props.permission === "edit"} onClick={() => { close(); props.onPermission("edit"); }}><FolderPen size={16} /><span>可写当前库</span>{props.permission === "edit" && <Check size={14} />}</button>
               {Platform.isDesktopApp && props.fullAccessAvailable && <button type="button" className="qa-full-access" aria-pressed={props.permission === "full"} onClick={() => { close(); props.onPermission("full"); }}><ShieldAlert size={16} /><span>完全访问</span>{props.permission === "full" && <Check size={14} />}</button>}
+              {allowAll && <>
+                <div className="qa-popover-section">本对话自动允许所有请求</div>
+                <button type="button" onClick={() => { close(); props.onStopAllowAll?.(); }}><ShieldQuestion size={16} /><span>恢复逐项询问</span></button>
+              </>}
             </>}
           </ComposerPopover>}
         </PromptInputTools>

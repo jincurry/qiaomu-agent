@@ -3,6 +3,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Chat } from "@ai-sdk/react";
 import { ChatPanel } from "../src/ui/chat-panel";
+import { ApprovalCard } from "../src/ui/turn-review";
 import { AgentTransport, messageText, type AgentMessage } from "../src/services/chat-transport";
 import { Platform, type App, type Component } from "obsidian";
 import { normalizePromptSettings, promptCatalog } from "../src/services/prompt-library";
@@ -338,6 +339,31 @@ it("shows access as an icon whose accessible name carries the current level", ()
   const trigger = screen.getByRole("button", { name: "访问权限：可写当前库" });
   expect(trigger.textContent).toBe("");
   expect(document.querySelector(".qa-permission-control.is-edit")).toBeTruthy();
+});
+it("explains the conversation-wide choice and records auto-allowed requests as one quiet line", () => {
+  const options = [{ id: "o1", label: "允许一次", kind: "allow_once" as const }, { id: "o2", label: "本对话都允许", kind: "allow_always" as const }];
+  const onChoose = vi.fn();
+  const { rerender } = render(<ApprovalCard approval={{ id: "p", title: "Codex 请求执行命令", detail: "npm test", status: "pending", options }} onChoose={onChoose} />);
+  expect(screen.getByRole("button", { name: "本对话都允许" }).getAttribute("title")).toContain("沙箱外");
+  rerender(<ApprovalCard approval={{ id: "p", title: "Codex 请求执行命令", detail: "npm test", status: "decided", chosen: "o1", auto: true, options }} onChoose={onChoose} />);
+  const card = screen.getByRole("group", { name: "Codex 请求执行命令" });
+  expect(card.textContent).toContain("本对话已自动允许");
+  expect(card.querySelector("button, pre")).toBeNull();
+});
+it("shows a request the access level refused as blocked, with the reason and nothing to choose", () => {
+  render(<ApprovalCard approval={{ id: "p", title: "Write", status: "decided", chosen: "o3", blocked: "可写当前库模式不能写入库外文件，需要时请切换到完全访问", options: [] }} onChoose={vi.fn()} />);
+  const card = screen.getByRole("group", { name: "Write" });
+  expect(card.textContent).toContain("已拦截：可写当前库模式不能写入库外文件");
+  expect(card.querySelector("button")).toBeNull();
+});
+it("marks a conversation that allows every request and lets it go back to asking", () => {
+  const { rerender, props } = setup();
+  const onStopAllowAll = vi.fn();
+  rerender(<ChatPanel {...props} permission="edit" allowAll onStopAllowAll={onStopAllowAll} />);
+  expect(document.querySelector(".qa-permission-control.is-allow-all")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "访问权限：可写当前库，本对话自动允许" }));
+  fireEvent.click(screen.getByRole("button", { name: "恢复逐项询问" }));
+  expect(onStopAllowAll).toHaveBeenCalledOnce();
 });
 it("shows the context ring only after a reported usage, warning near the limit", async () => {
   const { input, send, chat, props } = setup();

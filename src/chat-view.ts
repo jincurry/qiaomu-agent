@@ -14,9 +14,10 @@ import { PromptLibraryModal } from "./ui/prompt-library-panel";
 import type { PromptItem } from "./services/prompt-library";
 import { folderAttachment, webPageAttachment, readAttachment, validateAttachments, FOLDER_NOTE_LIMIT, MAX_ATTACHMENT_BYTES } from "./services/attachments";
 import { AgentTransport, fromStoredMessage, toStoredMessage, messageText, type AgentMessage, type TurnHooks } from "./services/chat-transport";
-import { TurnChangeTracker, toVaultPath } from "./services/change-tracker";
+import { TurnChangeTracker } from "./services/change-tracker";
 import { RevertDialog } from "./ui/revert-dialog";
-import { externalFiles } from "./services/local-host";
+import { externalFiles, localHost } from "./services/local-host";
+import { agentFileHost } from "./services/agent-files";
 import { ChatPanel } from "./ui/chat-panel";
 import { ModelManagerModal } from "./settings-tab";
 import { CapabilitiesModal } from "./ui/capabilities-modal";
@@ -58,6 +59,8 @@ export class ChatView extends ItemView {
   private readonly sourceState = new Map<string, { loading?: boolean; error?: string }>();
   /** Pending approval cards: id → resolver for the agent's request. */
   private readonly approvals = new Map<string, (choice: string | null) => void>();
+  /** Conversations that allow every agent request until access changes; not kept across restarts. */
+  private readonly allowAll = new Set<string>();
   /** Open question cards: id → resolver for the agent's questions. */
   private readonly questions = new Map<string, (answers: QuestionAnswers | null) => void>();
 
@@ -82,7 +85,7 @@ export class ChatView extends ItemView {
         if (!last || last.role !== "user") throw new Error("没有待发送的用户消息");
         const imageEdit = last.metadata?.attachments?.some((attachment) => attachment.intent === "edit") ?? false;
         // Image editing produces a chat artifact; inserting it into a note is a separate, confirmed action.
-        const permissionMode = imageEdit ? "plan" : settings.permissionMode === "full" && !fullAccessFor(backend.id) ? "edit" : settings.permissionMode;
+        const permissionMode = imageEdit ? "plan" : settings.permissionMode === "full" && !this.fullAccessFor(backend.id) ? "edit" : settings.permissionMode;
         const file = !imageEdit && this.attachNote ? this.plugin.getActiveMarkdownFile() : null;
         const parsed: unknown = backend.id === "api" ? {} : enabledMcpConfig(settings.mcpConfig, settings.disabledMcpServers);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("MCP 配置需要是 JSON 对象");
@@ -128,7 +131,7 @@ export class ChatView extends ItemView {
         let turn: TurnHooks = { awaitAnswers: this.awaitAnswers };
         if (snapshots) {
           if (file && activeFileContent !== undefined) snapshots.set(file.path, activeFileContent);
-          turn = this.turnHooks(snapshots);
+          turn = this.turnHooks(snapshots, permissionMode, this.fullAccessFor(backend.id));
         }
         return { backend, request: { ...request, systemPrompt: buildSystemPrompt(systemPrompt, vaultInstructions), activeFileContent }, turn };
       }, (attachment) => this.storeGeneratedAttachment(attachment)),
@@ -219,9 +222,16 @@ export class ChatView extends ItemView {
         prompt: "", systemPrompt: buildSystemPrompt(settings.systemPrompt), history: [],
         model: selection?.model, reasoningEffort: selection?.effort || undefined,
         cwd: this.plugin.skillService.getVaultRoot(),
-        permissionMode: settings.permissionMode === "full" && !fullAccessFor(backend.id) ? "edit" : settings.permissionMode,
+        permissionMode: settings.permissionMode === "full" && !this.fullAccessFor(backend.id) ? "edit" : settings.permissionMode,
       }).catch((error: unknown) => console.debug("Qiaomu Agent: preparation failed; send will retry", error));
     }
+  }
+
+  /** Codex enforces full access in its own sandbox, ACP agents through the plugin's approvals and file host, API models through its desktop tools. */
+  private fullAccessFor(backendId: string): boolean {
+    if (backendId === "api") return Platform.isDesktopApp;
+    const detection = backendId.startsWith("cli:") ? this.plugin.backendService.getDetections().find((item) => item.id === backendId.slice(4)) : undefined;
+    return !!detection && nativeTransportFor(detection.id, detection.nativePath) !== null;
   }
 
   private selectionKey(): string {
@@ -361,22 +371,19 @@ export class ChatView extends ItemView {
     signal.addEventListener("abort", cancel, { once: true });
     if (!this.containerEl.isShown()) new Notice("Agent 有问题需要你回答");
   });
-  /** Tracks what an agent turn changes, routes ACP file access through the vault, and asks for approvals. */
-  private turnHooks(snapshots: Map<string, string>): TurnHooks {
+  /** Tracks what an agent turn changes, routes ACP file access through the host, and asks for approvals. */
+  private turnHooks(snapshots: Map<string, string>, mode: PermissionMode, fullAccess: boolean): TurnHooks {
     const root = this.plugin.skillService.getVaultRoot();
-    const tracker = new TurnChangeTracker(this.app, root, snapshots, externalFiles());
+    const local = localHost();
+    const tracker = new TurnChangeTracker(this.app, root, snapshots, externalFiles(local));
     tracker.start();
-    const inVault = (path: string) => {
-      const relative = toVaultPath(path, root);
-      if (relative === null) throw new Error("只能访问当前库内的文件");
-      return relative;
-    };
-    return {
-      onFileIntent: (paths) => { for (const item of paths) if (item.read) tracker.observe(item.path); else tracker.intent(item.path, item.before, item.patch); },
-      host: {
-        readText: async (path) => this.app.vault.adapter.read(inVault(path)),
-        writeText: async (path, content) => {
-          const relative = inVault(path);
+    const conversation = activeIdentity(this.plugin.settings).id;
+    const host = agentFileHost({
+      root, mode, local, fullAccess,
+      onOutsideWrite: (path, before) => tracker.intent(path, before),
+      vault: {
+        read: (relative) => this.app.vault.adapter.read(relative),
+        write: async (relative, content) => {
           const adapter = this.app.vault.adapter;
           const exists = await adapter.exists(relative);
           tracker.intent(relative, exists ? await adapter.read(relative) : null);
@@ -390,9 +397,19 @@ export class ChatView extends ItemView {
           }
         },
       },
+    });
+    return {
+      onFileIntent: (paths) => { for (const item of paths) if (item.read) tracker.observe(item.path); else tracker.intent(item.path, item.before, item.patch); },
+      host,
+      refuse: (request) => host.refusal(request.writes ?? []),
+      allowsAll: () => this.allowAll.has(conversation),
       awaitApproval: (request, signal) => new Promise<string | null>((resolve) => {
         if (signal.aborted) { resolve(null); return; }
-        const done = (choice: string | null) => { this.approvals.delete(request.id); signal.removeEventListener("abort", cancel); resolve(choice); };
+        const done = (choice: string | null) => {
+          this.approvals.delete(request.id); signal.removeEventListener("abort", cancel);
+          if (request.options.find((option) => option.id === choice)?.kind === "allow_always") { this.allowAll.add(conversation); this.render(); }
+          resolve(choice);
+        };
         const cancel = () => done(null);
         this.approvals.set(request.id, done);
         signal.addEventListener("abort", cancel, { once: true });
@@ -560,7 +577,7 @@ export class ChatView extends ItemView {
     const source = sources.find((item) => item.key === picked?.source);
     const catalog = key.startsWith("cli:") ? this.plugin.settings.agentModelCache[key.slice(4)]?.models : activeProvider(this.plugin.settings)?.models;
     const model = source?.models.find((m) => m.id === picked?.model) ?? catalog?.find((m) => m.id === picked?.model);
-    const fullAccessAvailable = fullAccessFor(key.startsWith("api:") ? "api" : key);
+    const fullAccessAvailable = this.fullAccessFor(key.startsWith("api:") ? "api" : key);
     const permission = this.plugin.settings.permissionMode === "full" && !fullAccessAvailable ? "edit" : this.plugin.settings.permissionMode;
     this.root.render(createElement(ChatPanel, {
       chat: this.chat, app: this.app, parent: this,
@@ -592,7 +609,9 @@ export class ChatView extends ItemView {
         if (provider) checkImageInput(resolveModel(provider, modelId), attachments);
       },
       onAppend: (text: string, daily: boolean) => void this.append(text, daily),
-      permission, fileAccessAvailable: true, fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
+      permission, allowAll: this.allowAll.has(activeIdentity(this.plugin.settings).id),
+      onStopAllowAll: () => { this.allowAll.delete(activeIdentity(this.plugin.settings).id); this.render(); },
+      fileAccessAvailable: true, fullAccessAvailable, note: this.attachNote ? file : null, detachedNote: this.attachNote ? null : file,
       statusText: this.statusText,
       prefill: this.prefill, prefillVersion: this.prefillVersion, submitVersion: this.submitVersion, focusVersion: this.focusVersion, addRequest: this.addRequest,
       addHotkeys: Object.fromEntries(Object.entries(ADD_COMMANDS).map(([kind, command]) => [kind, commandHotkey(this.app, this.plugin.manifest.id, command.id, Platform.isMacOS)])) as Record<AddKind, string>,
@@ -607,6 +626,7 @@ export class ChatView extends ItemView {
         if (this.running() || this.plugin.settings.permissionMode === mode) return;
         const apply = () => {
           this.plugin.settings.permissionMode = mode;
+          this.allowAll.clear();
           this.plugin.backendService.resetSessions(this.backendOwner);
           void this.plugin.saveSettings(); this.render();
         };
@@ -634,9 +654,4 @@ function readingChip(snapshot: ContextSnapshot | null): ReadingChip | null {
   const origin = [snapshot.sourceName, snapshot.title, snapshot.location].filter(Boolean).join(" · ");
   const preview = (snapshot.selection?.text ?? snapshot.text ?? "").slice(0, 400);
   return { label: readingLabel(snapshot), detail: preview ? `${origin}\n\n${preview}` : origin, kind: snapshot.kind, selected: Boolean(snapshot.selection) };
-}
-
-/** Codex enforces full access in its own sandbox; API models get it through the plugin's desktop tools. */
-function fullAccessFor(backendId: string): boolean {
-  return backendId === "cli:codex" || (backendId === "api" && Platform.isDesktopApp);
 }

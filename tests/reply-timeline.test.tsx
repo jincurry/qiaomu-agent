@@ -38,6 +38,15 @@ it("keeps pending approvals visible and summarizes failures without a final repl
   expect(screen.getByRole("alert").closest("details")).toBeNull();
   expect(screen.getByRole("alert").textContent).toBe("有 1 项操作未完成，请展开处理记录查看详情。");
 });
+it("says why a live step failed, from the last line of its output", () => {
+  const message: AgentMessage = { ...initial, parts: [
+    { type: "data-activity", data: { id: "1", label: "Read `C:\\Users\\me\\.grok\\notes.md`", status: "failed", detail: "running\nFailed to read file: IO Error: 只能访问当前库内的文件\n" } },
+  ] };
+  render(<ReplyTimeline {...props} message={message} />);
+  const alert = screen.getByRole("alert");
+  expect(alert.textContent).toContain("操作失败：Read");
+  expect(alert.querySelector(".qa-step-failed-reason")!.textContent).toBe("Failed to read file: IO Error: 只能访问当前库内的文件");
+});
 it("folds failed attempts into the completed record after recovery and keeps their error details", () => {
   const message: AgentMessage = { ...initial, parts: [
     { type: "data-activity", data: { id: "1", kind: "command", label: "download first-source", status: "failed", detail: "Source unavailable" } },

@@ -1,5 +1,5 @@
 import { useId, useMemo } from "react";
-import { ChevronRight, FileDiff, ShieldQuestion, Undo2 } from "lucide-react";
+import { ChevronRight, FileDiff, ShieldCheck, ShieldQuestion, ShieldX, Undo2 } from "lucide-react";
 import type { ApprovalState, FileChange, TurnChanges } from "../types";
 import { diffLines, diffStats, hunks } from "../services/line-diff";
 
@@ -64,11 +64,21 @@ export function ChangeSummary({ changes, disabled, onOpen, onRevert }: { changes
   </details>;
 }
 
-const DECIDED: Record<string, string> = { allow_once: "已允许一次", allow_always: "本次会话已允许", reject_once: "已拒绝", reject_always: "已拒绝" };
+const DECIDED: Record<string, string> = { allow_once: "已允许一次", allow_always: "本对话都已允许", reject_once: "已拒绝", reject_always: "已拒绝" };
+const ALLOW_ALL_HINT = "本对话之后的操作请求都自动允许，包括需在沙箱外运行的命令；高风险命令仍会询问。可在访问权限中恢复逐项询问";
 
 /** Inline approval: the agent waits until one option is chosen. */
 export function ApprovalCard({ approval, onChoose }: { approval: ApprovalState; onChoose: (choice: string | null) => void }) {
   const titleId = useId();
+  // Refused by the access level: the agent was told no; say why, there is nothing to choose.
+  if (approval.blocked) return <div className="qa-approval is-blocked" role="group" aria-labelledby={titleId}>
+    <div className="qa-approval-head"><ShieldX size={15} aria-hidden="true" /><span id={titleId}>{approval.title}</span></div>
+    <p className="qa-approval-result">已拦截：{approval.blocked}</p>
+  </div>;
+  // Already allowed by the conversation: one quiet line, the step itself shows what ran.
+  if (approval.auto) return <div className="qa-approval is-auto" role="group" aria-labelledby={titleId}>
+    <div className="qa-approval-head"><ShieldCheck size={15} aria-hidden="true" /><span id={titleId}>{approval.title}</span><span className="qa-approval-result">本对话已自动允许</span></div>
+  </div>;
   const pending = approval.status === "pending";
   const chosen = approval.options.find((option) => option.id === approval.chosen);
   const ordered = [...approval.options].sort((a, b) => ["allow_once", "allow_always", "reject_once", "reject_always"].indexOf(a.kind) - ["allow_once", "allow_always", "reject_once", "reject_always"].indexOf(b.kind));
@@ -77,7 +87,7 @@ export function ApprovalCard({ approval, onChoose }: { approval: ApprovalState; 
     {approval.detail && <pre className="qa-approval-detail">{approval.detail}</pre>}
     {pending ? <div className="qa-approval-actions">
       {ordered.map((option) => <button key={option.id} type="button" className={option.kind === "allow_once" ? "mod-cta" : option.kind.startsWith("reject") ? "is-reject" : undefined}
-        onClick={() => onChoose(option.id)}>{option.label}</button>)}
+        title={option.kind === "allow_always" ? ALLOW_ALL_HINT : undefined} onClick={() => onChoose(option.id)}>{option.label}</button>)}
     </div> : <p className="qa-approval-result">{approval.status === "cancelled" ? "已取消" : chosen ? DECIDED[chosen.kind] ?? chosen.label : "已处理"}</p>}
   </div>;
 }

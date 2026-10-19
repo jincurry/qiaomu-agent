@@ -58,6 +58,13 @@ export function WorkingStatus({ label = "正在思考…" }: { label?: string })
   return <div className="qa-live-status" role="status"><WorkingGlyph /><span>{label}</span></div>;
 }
 
+/** Errors usually end a tool's output; the last line says why without the whole log. */
+function failureReason(detail?: string): string | null {
+  const line = detail?.split("\n").map((text) => text.trim()).filter(Boolean).at(-1);
+  if (!line) return null;
+  return line.length > 160 ? `${line.slice(0, 159)}…` : line;
+}
+
 function activityLabel(step?: ChatActivity): string {
   if (!step) return "正在思考…";
   if (step.kind === "command") {
@@ -87,7 +94,7 @@ export function ReplyTimeline({ message, active, statusText, renderText, renderA
         <summary>{!pending.length && <WorkingGlyph />}<span className="qa-live-label" role="status">{label}</span><ChevronRight className="qa-chevron" size={14} aria-hidden="true" /></summary>
         <div className="qa-worked-body">{segments.filter((segment) => segment.kind === "steps" || segment.kind === "plan").map(render)}</div>
       </details> : !pending.length && <WorkingStatus label={label} />}
-      {steps.filter((step) => step.status === "failed").map((step) => <div key={`failed-${step.id}`} className="qa-step-failed" role="alert"><AlertCircle size={14} aria-hidden="true" />操作失败：{step.label}</div>)}
+      {steps.filter((step) => step.status === "failed").map((step) => { const reason = failureReason(step.detail); return <div key={`failed-${step.id}`} className="qa-step-failed" role="alert"><AlertCircle size={14} aria-hidden="true" /><span>操作失败：{step.label}{reason && <span className="qa-step-failed-reason">{reason}</span>}</span></div>; })}
     </>;
   }
   const last = segments[segments.length - 1];
