@@ -58,9 +58,10 @@ export function WorkingStatus({ label = "正在思考…" }: { label?: string })
   return <div className="qa-live-status" role="status"><WorkingGlyph /><span>{label}</span></div>;
 }
 
-/** Errors usually end a tool's output; the last line says why without the whole log. */
-function failureReason(detail?: string): string | null {
-  const line = detail?.split("\n").map((text) => text.trim()).filter(Boolean).at(-1);
+/** Errors usually end a tool's output; the last line says why without the whole log.
+ *  A command's output is mostly what it printed, so only the line its backend picked out counts. */
+function failureReason(step: ChatActivity): string | null {
+  const line = step.reason ?? (step.detail?.startsWith("$ ") ? undefined : step.detail?.split("\n").map((text) => text.trim()).filter(Boolean).at(-1));
   if (!line) return null;
   return line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }
@@ -85,16 +86,22 @@ export function ReplyTimeline({ message, active, statusText, renderText, renderA
   if (active) {
     const steps = segments.flatMap((segment) => segment.kind === "steps" ? segment.steps : []);
     const current = [...steps].reverse().find((step) => step.status === "running");
+    // Agents probe and recover, so a failed step is counted here and explained in its row, not raised as an alert.
+    const failed = steps.filter((step) => step.status === "failed").length;
     const pending = segments.filter((segment) => (segment.kind === "approval" && segment.approval.status === "pending") || (segment.kind === "question" && segment.question.status === "pending"));
     const streaming = segments.at(-1)?.kind === "text" && !current;
     const label = pending.length ? "等待你的确认" : current ? activityLabel(current) : streaming ? "正在回复…" : statusText && !/连接|链接|思考/.test(statusText) ? statusText : "正在思考…";
     return <>
       {segments.filter((segment) => segment.kind === "text" || segment.kind === "approval" || segment.kind === "question").map(render)}
       {steps.length || segments.some((segment) => segment.kind === "plan") ? <details key="live-work" className="qa-live-work qa-worked qa-reply-segment">
-        <summary>{!pending.length && <WorkingGlyph />}<span className="qa-live-label" role="status">{label}</span><ChevronRight className="qa-chevron" size={14} aria-hidden="true" /></summary>
+        <summary>
+          {!pending.length && <WorkingGlyph />}
+          <span className="qa-live-label" role="status">{label}{failed > 0 && <span className="qiaomu-agent__sr-only">，{failed} 步出错</span>}</span>
+          {failed > 0 && <span className="qa-live-issues" aria-hidden="true"><AlertCircle size={12} />{failed} 步出错</span>}
+          <ChevronRight className="qa-chevron" size={14} aria-hidden="true" />
+        </summary>
         <div className="qa-worked-body">{segments.filter((segment) => segment.kind === "steps" || segment.kind === "plan").map(render)}</div>
       </details> : !pending.length && <WorkingStatus label={label} />}
-      {steps.filter((step) => step.status === "failed").map((step) => { const reason = failureReason(step.detail); return <div key={`failed-${step.id}`} className="qa-step-failed" role="alert"><AlertCircle size={14} aria-hidden="true" /><span>操作失败：{step.label}{reason && <span className="qa-step-failed-reason">{reason}</span>}</span></div>; })}
     </>;
   }
   const last = segments[segments.length - 1];
@@ -153,12 +160,17 @@ function StepRow({ step, running }: { step: ChatActivity; running: boolean }) {
       ? <code className="qa-step-target" title={target}>{target}</code>
       : <span className={`qa-step-target${live && !verb ? " qa-shimmer" : ""}`} title={target}>{target}</span>)}
     {step.kind === "edit" && (step.added || step.removed) ? <span className="qa-diffstat"><span className="is-added">+{step.added ?? 0}</span><span className="is-removed">−{step.removed ?? 0}</span></span> : null}
-    {step.status === "failed" && <span className="qa-step-failed"><AlertCircle size={13} aria-hidden="true" /><span className="qiaomu-agent__sr-only">失败</span></span>}
+    {step.status === "failed" && <span className="qa-step-failed">
+      <AlertCircle size={13} aria-hidden="true" /><span className="qiaomu-agent__sr-only">失败</span>
+      {step.exitCode !== undefined && <span className="qa-step-exit">退出码 {step.exitCode}</span>}
+    </span>}
     {step.status === "cancelled" && <span className="qa-step-note">已取消</span>}
   </>;
   if (!step.detail) return <div className={`qa-step is-${step.status}`}>{line}</div>;
+  const reason = step.status === "failed" ? failureReason(step) : null;
   return <details className={`qa-step is-${step.status}`}>
     <summary>{line}<ChevronRight className="qa-chevron" size={13} aria-hidden="true" /></summary>
+    {reason && reason !== step.detail.trim() && <p className="qa-step-failed-reason">{reason}</p>}
     <pre className="qa-step-detail">{step.detail}</pre>
   </details>;
 }

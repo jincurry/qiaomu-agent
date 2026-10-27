@@ -31,21 +31,28 @@ it("keeps pending approvals visible and summarizes failures without a final repl
   ] };
   const { rerender, container } = render(<ReplyTimeline {...props} message={message} />);
   expect(screen.getByRole("button", { name: "允许一次" }).closest("details")).toBeNull();
-  expect(screen.getByRole("alert").closest("details")).toBeNull();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("等待你的确认，1 步出错");
   expect(container.querySelector(".qa-working-glyph")).toBeNull();
   rerender(<ReplyTimeline {...props} message={message} active={false} />);
   expect(screen.getByRole("button", { name: "允许一次" }).closest("details")).toBeNull();
   expect(screen.getByRole("alert").closest("details")).toBeNull();
   expect(screen.getByRole("alert").textContent).toBe("有 1 项操作未完成，请展开处理记录查看详情。");
 });
-it("says why a live step failed, from the last line of its output", () => {
+it("counts live failures in the status row and explains each one in its own step", () => {
   const message: AgentMessage = { ...initial, parts: [
     { type: "data-activity", data: { id: "1", label: "Read `C:\\Users\\me\\.grok\\notes.md`", status: "failed", detail: "running\nFailed to read file: IO Error: 只能访问当前库内的文件\n" } },
+    { type: "data-activity", data: { id: "2", kind: "command", label: "Get-Location; Get-Command obsidian", status: "failed", exitCode: 1, detail: "$ Get-Location; Get-Command obsidian\nPath\n----\nC:\\vault" } },
   ] };
-  render(<ReplyTimeline {...props} message={message} />);
-  const alert = screen.getByRole("alert");
-  expect(alert.textContent).toContain("操作失败：Read");
-  expect(alert.querySelector(".qa-step-failed-reason")!.textContent).toBe("Failed to read file: IO Error: 只能访问当前库内的文件");
+  const { container } = render(<ReplyTimeline {...props} message={message} />);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByRole("status").textContent).toBe("正在思考…，2 步出错");
+  expect(container.querySelector(".qa-live-issues")!.textContent).toBe("2 步出错");
+  const [read, command] = [...container.querySelectorAll(".qa-step.is-failed")];
+  expect(read!.querySelector(".qa-step-failed-reason")!.textContent).toBe("Failed to read file: IO Error: 只能访问当前库内的文件");
+  expect(command!.querySelector(".qa-step-exit")!.textContent).toBe("退出码 1");
+  // What a command printed is not why it failed.
+  expect(command!.querySelector(".qa-step-failed-reason")).toBeNull();
 });
 it("folds failed attempts into the completed record after recovery and keeps their error details", () => {
   const message: AgentMessage = { ...initial, parts: [
@@ -53,7 +60,8 @@ it("folds failed attempts into the completed record after recovery and keeps the
     { type: "data-activity", data: { id: "2", kind: "command", label: "download fallback", status: "running" } },
   ] };
   const { rerender, container } = render(<ReplyTimeline {...props} message={message} />);
-  expect(screen.getByRole("alert").textContent).toContain("download first-source");
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(container.querySelector(".qa-live-issues")!.textContent).toBe("1 步出错");
   const live = container.querySelector(".qa-live-work") as HTMLDetailsElement;
   fireEvent.click(live.querySelector("summary")!);
   expect(live.open).toBe(true);

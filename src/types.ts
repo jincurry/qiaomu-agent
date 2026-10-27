@@ -226,6 +226,10 @@ export interface ChatActivity {
   /** Lines an edit added and removed. */
   added?: number;
   removed?: number;
+  /** A command's non-zero exit code. */
+  exitCode?: number;
+  /** The line of a failed command's output that says why, when one does. */
+  reason?: string;
 }
 
 export interface ExploreAction { type: "read" | "search" | "list"; target: string }

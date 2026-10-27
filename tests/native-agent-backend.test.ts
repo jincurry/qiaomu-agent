@@ -85,7 +85,33 @@ describe("codexActivity", () => {
     expect(step).toMatchObject({ kind: "explore", label: "搜索 Spotify，读取 a.md", actions: [{ type: "search", target: "Spotify" }, { type: "read", target: "a.md" }] });
     expect(step.detail).toBe("$ rg -n Spotify notes && cat a.md\na.md:1:Spotify");
     const run = codexActivity({ command: "npm test", exitCode: 1, aggregatedOutput: "fail", commandActions: [{ type: "unknown", command: "npm test" }] }, "commandExecution");
-    expect(run).toMatchObject({ kind: "command", label: "npm test", detail: "$ npm test\nfail\n退出码 1" });
+    expect(run).toMatchObject({ kind: "command", label: "npm test", detail: "$ npm test\nfail", exitCode: 1 });
+    expect(run).not.toHaveProperty("reason");
+  });
+  it("unwraps the PowerShell and cmd wrappers Codex runs on Windows", () => {
+    const label = (command: string) => codexActivityLabel({ command }, "commandExecution");
+    const powershell = String.raw`"C:\\windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe"`;
+    expect(label(`${powershell} -Command "Get-Location; rg --files -g AGENTS.md -g '*.base'; Get-Command obsidian -ErrorAction SilentlyContinue"`))
+      .toBe("Get-Location; rg --files -g AGENTS.md -g '*.base'; Get-Command obsidian -ErrorAction SilentlyContinue");
+    // Codex quotes around single quotes by switching to double quotes mid-word.
+    expect(label(`${powershell} -Command '$ids=@('"'a','b'); foreach("'$id in $ids){ Write-Output $id }'`)).toBe("$ids=@('a','b'); foreach($id in $ids){ Write-Output $id }");
+    expect(label('pwsh -NoProfile -c "Get-Date"')).toBe("Get-Date");
+    expect(label(String.raw`"C:\\Windows\\system32\\cmd.exe" /c dir /b`)).toBe("dir /b");
+    expect(label('powershell.exe -Command "unclosed')).toBe('powershell.exe -Command "unclosed');
+    const multiline = codexActivity({ command: `${powershell} -Command 'Get-Location\nGet-Date'` }, "commandExecution");
+    expect(multiline).toMatchObject({ label: "Get-Location Get-Date", detail: "$ Get-Location\nGet-Date" });
+  });
+  it("picks the line that says why out of a failed command's output", () => {
+    const output = [
+      "Path", "----", "C:\\vault",
+      "Get-Content : 找不到路径“C:\\vault\\x.md”，因为该路径不存在。", "所在位置 行:1 字符: 15", "+ Get-Content 'x.md'",
+      "    + CategoryInfo          : ObjectNotFound: (C:\\vault\\x.md:String) [Get-Content], ItemNotFoundException",
+      "{", '  "show_error": true', "}",
+    ].join("\n");
+    expect(codexActivity({ command: "Get-Content 'x.md'", exitCode: 1, aggregatedOutput: output }, "commandExecution"))
+      .toMatchObject({ exitCode: 1, reason: "Get-Content : 找不到路径“C:\\vault\\x.md”，因为该路径不存在。" });
+    expect(codexActivity({ command: "rg nothing", exitCode: 1, aggregatedOutput: "" }, "commandExecution")).not.toHaveProperty("reason");
+    expect(codexActivity({ command: "ls", exitCode: 0, aggregatedOutput: "error.log" }, "commandExecution")).not.toHaveProperty("exitCode");
   });
   it("counts an edit's lines and names its files", () => {
     const diff = "--- a/a.md\n+++ b/a.md\n@@\n-old\n+new\n+more";

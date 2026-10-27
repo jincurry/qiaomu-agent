@@ -786,12 +786,13 @@ export function codexActivity(item: Record<string, unknown>, type: string): Omit
   const text = (key: string) => { const value = item[key]; return typeof value === "string" ? value.trim() : ""; };
   if (text("title")) return { label: text("title") };
   if (type === "commandExecution" && text("command")) {
-    const command = shellCommand(text("command"));
+    const script = shellScript(text("command"));
     const output = typeof item.aggregatedOutput === "string" ? tail(item.aggregatedOutput.trimEnd(), 4_000) : "";
-    const exit = typeof item.exitCode === "number" && item.exitCode !== 0 ? `\n退出码 ${item.exitCode}` : "";
-    const detail = `$ ${command}${output ? `\n${output}` : ""}${exit}`;
+    const detail = `$ ${script}${output ? `\n${output}` : ""}`;
+    const reason = errorLine(output);
+    const exit = typeof item.exitCode === "number" && item.exitCode !== 0 ? { exitCode: item.exitCode, ...(reason ? { reason } : {}) } : {};
     const actions = exploreActions(item.commandActions);
-    return actions ? { kind: "explore", label: actions.map(describeExplore).join("，"), actions, detail } : { kind: "command", label: command, detail };
+    return actions ? { kind: "explore", label: actions.map(describeExplore).join("，"), actions, detail, ...exit } : { kind: "command", label: script.replace(/\s+/g, " "), detail, ...exit };
   }
   if (type === "fileChange") {
     const changes = (Array.isArray(item.changes) ? item.changes : []).map(record).filter((c): c is Record<string, unknown> => Boolean(c));
@@ -866,9 +867,55 @@ function codexPlan(params: unknown): ChatPlan | null {
   return { steps, ...(explanation ? { explanation } : {}) };
 }
 
-/** The command a user would recognise: the script inside `zsh -lc '…'`, on one line. */
-function shellCommand(command: string): string {
-  const wrapped = /^(?:\S*\/)?(?:ba|z)?sh\s+-l?c\s+(?:(['"])([\s\S]*)\1|([^'"\s][\s\S]*))$/.exec(command);
-  const inner = !wrapped ? command : wrapped[3] ?? wrapped[2]!.replace(wrapped[1] === "'" ? /'\\''/g : /\\"/g, wrapped[1]!);
-  return inner.replace(/\s+/g, " ").trim();
+/** The command a user would recognise: the script inside `zsh -lc '…'`, `powershell.exe -Command "…"` or `cmd /c …`. */
+function shellScript(command: string): string {
+  const words = shellWords(command.trim());
+  const program = words?.[0]?.split(/[\\/]/).pop()!.toLowerCase().replace(/\.exe$/, "");
+  let at = -1;
+  if (program && /^(?:ba|z)?sh$/.test(program)) at = /^-l?c$/.test(words![1] ?? "") ? 2 : -1;
+  else if (program === "powershell" || program === "pwsh") at = words!.findIndex((word) => /^-(?:c|command)$/i.test(word)) + 1;
+  else if (program === "cmd") at = /^\/c$/i.test(words![1] ?? "") ? 2 : -1;
+  return at > 0 && words!.length > at ? words!.slice(at).join(" ").trim() : command.trim();
+}
+
+/** Splits a command line quoted the POSIX way, as Codex joins argv; null when a quote never closes. */
+function shellWords(line: string): string[] | null {
+  const words: string[] = [];
+  let word: string | null = null;
+  for (let i = 0; i < line.length; i++) {
+    const c = line[i]!;
+    if (/\s/.test(c)) {
+      if (word !== null) words.push(word);
+      word = null;
+      continue;
+    }
+    word ??= "";
+    if (c === "'") {
+      const end = line.indexOf("'", i + 1);
+      if (end < 0) return null;
+      word += line.slice(i + 1, end);
+      i = end;
+    } else if (c === '"') {
+      let j = i + 1;
+      for (; j < line.length && line[j] !== '"'; j++) {
+        if (line[j] === "\\" && /[\\"$`]/.test(line[j + 1] ?? "")) j++;
+        word += line[j];
+      }
+      if (j >= line.length) return null;
+      i = j;
+    } else if (c === "\\") word += line[++i] ?? "";
+    else word += c;
+  }
+  if (word !== null) words.push(word);
+  return words;
+}
+
+const ERROR_WORDS = /\b(?:error|exception|denied|not found|no such file|cannot|failed|fatal)\b|无法|错误|失败|拒绝|不存在|找不到|未找到|没有权限/i;
+// PowerShell's position and category lines, and JSON a command printed, mention errors without explaining one.
+const NOT_A_REASON = /^(?:\+|"|\{|所在位置|At line|At [A-Z]:)/;
+
+/** The last line of a command's output that reads like an error, shortened to fit one line. */
+function errorLine(output: string): string | undefined {
+  const line = output.split("\n").map((text) => text.trim()).filter((text) => ERROR_WORDS.test(text) && !NOT_A_REASON.test(text)).at(-1);
+  return line && line.length > 160 ? `${line.slice(0, 159)}…` : line;
 }

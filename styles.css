@@ -302,10 +302,9 @@ body:has(.workspace-leaf.mod-active > .workspace-leaf-content:is(
 .qiaomu-agent--react .qa-step-target { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-normal); }
 .qiaomu-agent--react code.qa-step-target { padding: 0; background: none; font-size: 12px; }
 .qiaomu-agent--react .qa-step.is-failed .qa-step-target { color: var(--text-muted); }
-.qiaomu-agent--react .qa-step-failed { flex: none; display: inline-flex; color: var(--text-error); }
-.qiaomu-agent--react .qa-step-failed[role="alert"] { gap: 4px; align-items: flex-start; }
-.qiaomu-agent--react .qa-step-failed[role="alert"] > svg { margin-top: 3px; flex: none; }
-.qiaomu-agent--react .qa-step-failed-reason { display: block; color: var(--text-muted); font-size: 12px; overflow-wrap: anywhere; }
+.qiaomu-agent--react .qa-step-failed { flex: none; display: inline-flex; align-items: center; gap: 4px; color: var(--text-error); }
+.qiaomu-agent--react .qa-step-exit { color: var(--text-muted); font-size: 12px; white-space: nowrap; }
+.qiaomu-agent--react .qa-step-failed-reason { margin: 2px 0 6px; color: var(--text-normal); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
 .qiaomu-agent--react .qa-step-note { flex: none; color: var(--text-faint); font-size: 12px; }
 .qiaomu-agent--react .qa-diffstat { flex: none; display: inline-flex; gap: 4px; font-family: var(--font-monospace); font-size: 12px; }
 .qiaomu-agent--react .qa-diffstat .is-added { color: var(--color-green); }
@@ -596,6 +595,8 @@ body:has(.workspace-leaf.mod-active > .workspace-leaf-content:is(
 .qiaomu-agent--react .qa-live-work > summary { display: inline-flex; gap: 8px; max-width: 100%; }
 .qiaomu-agent--react .qa-worked > summary > .qa-chevron { margin-left: 0; color: var(--text-faint); }
 .qiaomu-agent--react .qa-live-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.qiaomu-agent--react .qa-live-issues { flex: none; display: inline-flex; align-items: center; gap: 4px; font-size: 12px; white-space: nowrap; }
+.qiaomu-agent--react .qa-live-issues > svg { color: var(--text-error); }
 .qiaomu-agent--react .qa-working-glyph { flex: none; color: var(--text-muted); }
 .qiaomu-agent--react .qa-working-glyph path { transform-origin: 12px 12px; }
 .qiaomu-agent--react .qa-orbit { animation: qa-orbit 3.6s linear infinite; }
